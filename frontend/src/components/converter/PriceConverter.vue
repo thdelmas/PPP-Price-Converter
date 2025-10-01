@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import type { Country } from '@/types'
-import { loadPPPData, getCurrencyToCountryCode, getCountriesFromPPPData } from '@/utils/pppParser'
+import { loadPPPData, getCountriesFromPPPData } from '@/utils/pppParser'
 import { fetchExchangeRates, getExchangeRate, type ExchangeRates } from '@/services/currencyService'
 
 // Country data dynamically loaded from CSV
@@ -25,7 +25,7 @@ onMounted(async () => {
     const [loadedCountries, pppData, rates] = await Promise.all([
       getCountriesFromPPPData(),
       loadPPPData(),
-      fetchExchangeRates()
+      fetchExchangeRates(),
     ])
 
     countries.value = loadedCountries
@@ -36,15 +36,13 @@ onMounted(async () => {
       ratesLoadError.value = 'Using fallback exchange rates (API unavailable)'
     }
 
-    const currencyToCountry = getCurrencyToCountryCode()
-
-    // Map PPP factors by currency code
+    // Map PPP factors by country code (not currency code)
+    // This ensures each country retains its unique PPP factor
     const factors: Record<string, number> = {}
 
-    for (const [currencyCode, countryCode] of Object.entries(currencyToCountry)) {
-      const data = pppData.get(countryCode)
+    for (const [countryCode, data] of pppData.entries()) {
       if (data && data.pppFactor !== null) {
-        factors[currencyCode] = data.pppFactor
+        factors[countryCode] = data.pppFactor
       }
     }
 
@@ -58,7 +56,7 @@ onMounted(async () => {
 })
 
 // Component state
-const price = ref<number | null>(1.00)
+const price = ref<number | null>(1.0)
 const originCountryCode = ref<string>('USA')
 const targetCountryCode = ref<string>('GBR')
 
@@ -72,15 +70,21 @@ const targetCountry = computed(() =>
 )
 
 const convertedPrice = computed(() => {
-  if (!price.value || !originCountry.value || !targetCountry.value || isLoading.value || !exchangeRates.value) {
+  if (
+    !price.value ||
+    !originCountry.value ||
+    !targetCountry.value ||
+    isLoading.value ||
+    !exchangeRates.value
+  ) {
     return null
   }
 
   const originCurrency = originCountry.value.currencyCode
   const targetCurrency = targetCountry.value.currencyCode
 
-  const originPPP = pppFactors.value[originCurrency]
-  const targetPPP = pppFactors.value[targetCurrency]
+  const originPPP = pppFactors.value[originCountry.value.code]
+  const targetPPP = pppFactors.value[targetCountry.value.code]
 
   // Guard against undefined PPP values
   if (!originPPP || !targetPPP) {
@@ -89,7 +93,7 @@ const convertedPrice = computed(() => {
 
   // Get the real-time exchange rate
   const conversionRate = getExchangeRate(originCurrency, targetCurrency, exchangeRates.value)
-  
+
   // Convert using exchange rate
   const exchangeConverted = price.value * conversionRate
 
@@ -141,10 +145,11 @@ const swapCountries = () => {
       <!-- Main Content -->
       <div v-else>
         <!-- Exchange rates warning -->
-        <div v-if="ratesLoadError" class="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-          <p class="text-sm text-yellow-800 dark:text-yellow-200">
-            ⚠️ {{ ratesLoadError }}
-          </p>
+        <div
+          v-if="ratesLoadError"
+          class="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg"
+        >
+          <p class="text-sm text-yellow-800 dark:text-yellow-200">⚠️ {{ ratesLoadError }}</p>
         </div>
 
         <!-- Price Input -->
@@ -185,10 +190,10 @@ const swapCountries = () => {
           </select>
           <!-- PPP Factor Display for Origin -->
           <p
-            v-if="originCountry && pppFactors[originCountry.currencyCode]"
+            v-if="originCountry && pppFactors[originCountry.code]"
             class="text-xs text-gray-500 dark:text-gray-400"
           >
-            PPP Factor (2024): {{ pppFactors[originCountry.currencyCode]?.toFixed(3) }}
+            PPP Factor (2024): {{ pppFactors[originCountry.code]?.toFixed(3) }}
           </p>
         </div>
 
@@ -235,10 +240,10 @@ const swapCountries = () => {
           </select>
           <!-- PPP Factor Display for Target -->
           <p
-            v-if="targetCountry && pppFactors[targetCountry.currencyCode]"
+            v-if="targetCountry && pppFactors[targetCountry.code]"
             class="text-xs text-gray-500 dark:text-gray-400"
           >
-            PPP Factor (2024): {{ pppFactors[targetCountry.currencyCode]?.toFixed(3) }}
+            PPP Factor (2024): {{ pppFactors[targetCountry.code]?.toFixed(3) }}
           </p>
         </div>
 
@@ -260,7 +265,8 @@ const swapCountries = () => {
                   {{ formatCurrency(convertedPrice.exchange, convertedPrice.currency) }}
                 </p>
                 <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                  Rate: 1 {{ originCountry?.currencyCode }} = {{ convertedPrice.conversionRate.toFixed(4) }} {{ targetCountry?.currencyCode }}
+                  Rate: 1 {{ originCountry?.currencyCode }} =
+                  {{ convertedPrice.conversionRate.toFixed(4) }} {{ targetCountry?.currencyCode }}
                 </p>
               </div>
               <div class="text-sm text-gray-500 dark:text-gray-400">
@@ -289,7 +295,8 @@ const swapCountries = () => {
           <!-- Explanation -->
           <div class="text-xs text-gray-500 dark:text-gray-400 mt-4">
             <p>
-              💡 <strong>Exchange Rate Conversion:</strong> Direct currency conversion using real-time market exchange rates.
+              💡 <strong>Exchange Rate Conversion:</strong> Direct currency conversion using
+              real-time market exchange rates.
             </p>
             <p class="mt-1">
               💡 <strong>PPP-Adjusted Price:</strong> Price adjusted for purchasing power
@@ -300,7 +307,8 @@ const swapCountries = () => {
               means stronger purchasing power.
             </p>
             <p v-if="exchangeRates" class="mt-1">
-              💡 <strong>Exchange rates updated:</strong> {{ exchangeRates.lastUpdated || 'Recently' }}
+              💡 <strong>Exchange rates updated:</strong>
+              {{ exchangeRates.lastUpdated || 'Recently' }}
             </p>
           </div>
         </div>
