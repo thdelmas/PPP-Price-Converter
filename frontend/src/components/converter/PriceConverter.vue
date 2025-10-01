@@ -96,7 +96,7 @@ onMounted(async () => {
 })
 
 // Component state
-const price = ref<number | null>(null)
+const price = ref<number | null>(1.00)
 const originCountryCode = ref<string>('USA')
 const targetCountryCode = ref<string>('GBR')
 
@@ -191,7 +191,7 @@ const swapCountries = () => {
             type="number"
             min="0"
             step="0.01"
-            placeholder="0.00"
+            placeholder="1.00"
             class="w-full px-4 py-3 text-lg border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
           />
         </div>
