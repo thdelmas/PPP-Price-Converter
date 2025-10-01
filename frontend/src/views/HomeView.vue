@@ -11,13 +11,14 @@ const title = ref('PPP Price Converter')
       <h1 class="text-4xl font-bold text-center text-gray-900 dark:text-white mb-8">
         {{ title }}
       </h1>
-      
+
       <div class="max-w-4xl mx-auto mb-8">
         <p class="text-center text-gray-600 dark:text-gray-300 mb-2">
           Convert prices across different countries using Purchasing Power Parity (PPP) data.
         </p>
         <p class="text-center text-sm text-gray-500 dark:text-gray-400">
-          Compare exchange rate conversions with PPP-adjusted prices to understand true purchasing power.
+          Compare exchange rate conversions with PPP-adjusted prices to understand true purchasing
+          power.
         </p>
       </div>
 
