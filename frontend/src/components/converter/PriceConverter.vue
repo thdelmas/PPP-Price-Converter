@@ -2,6 +2,7 @@
 import { ref, computed, onMounted } from 'vue'
 import type { Country } from '@/types'
 import { loadPPPData, getCurrencyToCountryCode, getCountriesFromPPPData } from '@/utils/pppParser'
+import { fetchExchangeRates, getExchangeRate, type ExchangeRates } from '@/services/currencyService'
 
 // Country data dynamically loaded from CSV
 const countries = ref<Country[]>([])
@@ -9,70 +10,31 @@ const countries = ref<Country[]>([])
 // PPP conversion factors loaded from CSV
 const pppFactors = ref<Record<string, number>>({})
 
+// Real-time exchange rates
+const exchangeRates = ref<ExchangeRates | null>(null)
+
 // Loading state
 const isLoading = ref(true)
 const loadError = ref<string | null>(null)
+const ratesLoadError = ref<string | null>(null)
 
-// Mock exchange rates (relative to USD, approximate values)
-// Note: In a production app, these would be fetched from an exchange rate API
-const exchangeRates: Record<string, number> = {
-  USD: 1.0,
-  GBP: 0.79,
-  EUR: 0.92,
-  JPY: 149.0,
-  CAD: 1.36,
-  AUD: 1.53,
-  INR: 83.0,
-  CNY: 7.24,
-  CHF: 0.88,
-  NOK: 10.5,
-  SEK: 10.3,
-  DKK: 6.9,
-  PLN: 4.0,
-  TRY: 32.0,
-  RUB: 92.0,
-  BRL: 5.0,
-  MXN: 17.0,
-  ZAR: 18.5,
-  KRW: 1320.0,
-  SGD: 1.34,
-  HKD: 7.8,
-  NZD: 1.63,
-  IDR: 15700.0,
-  THB: 35.0,
-  MYR: 4.7,
-  PHP: 56.0,
-  ISK: 137.0,
-  CZK: 23.0,
-  HUF: 360.0,
-  RON: 4.6,
-  HRK: 7.0,
-  BGD: 110.0,
-  PKR: 278.0,
-  VND: 24500.0,
-  EGP: 48.5,
-  NGA: 1400.0,
-  ARS: 990.0,
-  CLP: 950.0,
-  COP: 4050.0,
-  PER: 3.8,
-  ILS: 3.7,
-  AED: 3.67,
-  SAR: 3.75,
-  QAR: 3.64,
-  KWD: 0.31,
-  OMR: 0.38,
-  BHD: 0.38,
-  // Add more currencies as needed - for now, default to 1.0 if not found
-}
-
-// Load PPP data on mount
+// Load PPP data and exchange rates on mount
 onMounted(async () => {
   try {
-    // Load countries and PPP data in parallel
-    const [loadedCountries, pppData] = await Promise.all([getCountriesFromPPPData(), loadPPPData()])
+    // Load countries, PPP data, and exchange rates in parallel
+    const [loadedCountries, pppData, rates] = await Promise.all([
+      getCountriesFromPPPData(),
+      loadPPPData(),
+      fetchExchangeRates()
+    ])
 
     countries.value = loadedCountries
+    exchangeRates.value = rates
+
+    // Check if we're using fallback rates
+    if (rates.lastUpdated === 'Static fallback rates') {
+      ratesLoadError.value = 'Using fallback exchange rates (API unavailable)'
+    }
 
     const currencyToCountry = getCurrencyToCountryCode()
 
@@ -110,15 +72,13 @@ const targetCountry = computed(() =>
 )
 
 const convertedPrice = computed(() => {
-  if (!price.value || !originCountry.value || !targetCountry.value || isLoading.value) {
+  if (!price.value || !originCountry.value || !targetCountry.value || isLoading.value || !exchangeRates.value) {
     return null
   }
 
   const originCurrency = originCountry.value.currencyCode
   const targetCurrency = targetCountry.value.currencyCode
 
-  const originExchangeRate = exchangeRates[originCurrency] || 1.0
-  const targetExchangeRate = exchangeRates[targetCurrency] || 1.0
   const originPPP = pppFactors.value[originCurrency]
   const targetPPP = pppFactors.value[targetCurrency]
 
@@ -127,9 +87,11 @@ const convertedPrice = computed(() => {
     return null
   }
 
+  // Get the real-time exchange rate
+  const conversionRate = getExchangeRate(originCurrency, targetCurrency, exchangeRates.value)
+  
   // Convert using exchange rate
-  const priceInUSD = price.value / originExchangeRate
-  const exchangeConverted = priceInUSD * targetExchangeRate
+  const exchangeConverted = price.value * conversionRate
 
   // Apply PPP adjustment
   const pppAdjusted = (price.value * targetPPP) / originPPP
@@ -140,6 +102,7 @@ const convertedPrice = computed(() => {
     currency: targetCurrency,
     originPPP,
     targetPPP,
+    conversionRate,
   }
 })
 
@@ -177,6 +140,13 @@ const swapCountries = () => {
 
       <!-- Main Content -->
       <div v-else>
+        <!-- Exchange rates warning -->
+        <div v-if="ratesLoadError" class="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+          <p class="text-sm text-yellow-800 dark:text-yellow-200">
+            ⚠️ {{ ratesLoadError }}
+          </p>
+        </div>
+
         <!-- Price Input -->
         <div class="space-y-2">
           <label
@@ -289,6 +259,9 @@ const swapCountries = () => {
                 <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">
                   {{ formatCurrency(convertedPrice.exchange, convertedPrice.currency) }}
                 </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Rate: 1 {{ originCountry?.currencyCode }} = {{ convertedPrice.conversionRate.toFixed(4) }} {{ targetCountry?.currencyCode }}
+                </p>
               </div>
               <div class="text-sm text-gray-500 dark:text-gray-400">
                 {{ originCountry?.currencyCode }} → {{ targetCountry?.currencyCode }}
@@ -316,8 +289,7 @@ const swapCountries = () => {
           <!-- Explanation -->
           <div class="text-xs text-gray-500 dark:text-gray-400 mt-4">
             <p>
-              💡 <strong>Exchange Rate Conversion:</strong> Direct currency conversion using market
-              exchange rates.
+              💡 <strong>Exchange Rate Conversion:</strong> Direct currency conversion using real-time market exchange rates.
             </p>
             <p class="mt-1">
               💡 <strong>PPP-Adjusted Price:</strong> Price adjusted for purchasing power
@@ -326,6 +298,9 @@ const swapCountries = () => {
             <p class="mt-1">
               💡 <strong>PPP Factors:</strong> Based on World Bank 2024 data. A lower PPP factor
               means stronger purchasing power.
+            </p>
+            <p v-if="exchangeRates" class="mt-1">
+              💡 <strong>Exchange rates updated:</strong> {{ exchangeRates.lastUpdated || 'Recently' }}
             </p>
           </div>
         </div>
