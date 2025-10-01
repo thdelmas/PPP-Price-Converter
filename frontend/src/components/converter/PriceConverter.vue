@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import type { Country } from '@/types'
+import { loadPPPData, getCurrencyToCountryCode } from '@/utils/pppParser'
 
-// Mock data for countries with PPP factors (relative to USD)
+// Country data with flags
 const countries: Country[] = [
   {
     name: 'United States',
@@ -62,17 +63,12 @@ const countries: Country[] = [
   },
 ]
 
-// Mock PPP conversion factors (relative to USD, approximate values)
-const pppFactors: Record<string, number> = {
-  USD: 1.0,
-  GBP: 0.72,
-  EUR: 0.85,
-  JPY: 102.5,
-  CAD: 1.25,
-  AUD: 1.35,
-  INR: 22.5,
-  CNY: 3.5,
-}
+// PPP conversion factors loaded from CSV
+const pppFactors = ref<Record<string, number>>({})
+
+// Loading state
+const isLoading = ref(true)
+const loadError = ref<string | null>(null)
 
 // Mock exchange rates (relative to USD, approximate values)
 const exchangeRates: Record<string, number> = {
@@ -85,6 +81,31 @@ const exchangeRates: Record<string, number> = {
   INR: 83.0,
   CNY: 7.24,
 }
+
+// Load PPP data on mount
+onMounted(async () => {
+  try {
+    const pppData = await loadPPPData()
+    const currencyToCountry = getCurrencyToCountryCode()
+    
+    // Map PPP factors by currency code
+    const factors: Record<string, number> = {}
+    
+    for (const [currencyCode, countryCode] of Object.entries(currencyToCountry)) {
+      const data = pppData.get(countryCode)
+      if (data && data.pppFactor !== null) {
+        factors[currencyCode] = data.pppFactor
+      }
+    }
+    
+    pppFactors.value = factors
+    isLoading.value = false
+  } catch (error) {
+    console.error('Failed to load PPP data:', error)
+    loadError.value = 'Failed to load PPP data'
+    isLoading.value = false
+  }
+})
 
 // Component state
 const price = ref<number | null>(null)
@@ -101,7 +122,7 @@ const targetCountry = computed(() =>
 )
 
 const convertedPrice = computed(() => {
-  if (!price.value || !originCountry.value || !targetCountry.value) {
+  if (!price.value || !originCountry.value || !targetCountry.value || isLoading.value) {
     return null
   }
 
@@ -110,8 +131,8 @@ const convertedPrice = computed(() => {
 
   const originExchangeRate = exchangeRates[originCurrency]
   const targetExchangeRate = exchangeRates[targetCurrency]
-  const originPPP = pppFactors[originCurrency]
-  const targetPPP = pppFactors[targetCurrency]
+  const originPPP = pppFactors.value[originCurrency]
+  const targetPPP = pppFactors.value[targetCurrency]
 
   // Guard against undefined values
   if (!originExchangeRate || !targetExchangeRate || !originPPP || !targetPPP) {
@@ -129,6 +150,8 @@ const convertedPrice = computed(() => {
     exchange: exchangeConverted,
     ppp: pppAdjusted,
     currency: targetCurrency,
+    originPPP,
+    targetPPP,
   }
 })
 
@@ -153,58 +176,184 @@ const swapCountries = () => {
 <template>
   <div class="w-full max-w-4xl mx-auto">
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 space-y-6">
-      <!-- Price Input -->
-      <div class="space-y-2">
-        <label
-          for="price-input"
-          class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-        >
-          Enter Price
-        </label>
-        <input
-          id="price-input"
-          v-model.number="price"
-          type="number"
-          min="0"
-          step="0.01"
-          placeholder="0.00"
-          class="w-full px-4 py-3 text-lg border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-        >
+      <!-- Loading State -->
+      <div v-if="isLoading" class="text-center py-12">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+        <p class="mt-4 text-gray-600 dark:text-gray-400">Loading PPP data...</p>
       </div>
 
-      <!-- Origin Country Selector -->
-      <div class="space-y-2">
-        <label
-          for="origin-country"
-          class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-        >
-          Origin Country & Currency
-        </label>
-        <select
-          id="origin-country"
-          v-model="originCountryCode"
-          class="w-full px-4 py-3 text-lg border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-        >
-          <option
-            v-for="country in countries"
-            :key="country.code"
-            :value="country.code"
+      <!-- Error State -->
+      <div v-else-if="loadError" class="text-center py-12">
+        <p class="text-red-600 dark:text-red-400">{{ loadError }}</p>
+      </div>
+
+      <!-- Main Content -->
+      <div v-else>
+        <!-- Price Input -->
+        <div class="space-y-2">
+          <label
+            for="price-input"
+            class="block text-sm font-medium text-gray-700 dark:text-gray-300"
           >
-            {{ country.flag }} {{ country.name }} ({{ country.currencyCode }})
-          </option>
-        </select>
-      </div>
+            Enter Price
+          </label>
+          <input
+            id="price-input"
+            v-model.number="price"
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="0.00"
+            class="w-full px-4 py-3 text-lg border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          >
+        </div>
 
-      <!-- Swap Button -->
-      <div class="flex justify-center">
-        <button
-          type="button"
-          class="p-3 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
-          @click="swapCountries"
+        <!-- Origin Country Selector -->
+        <div class="space-y-2">
+          <label
+            for="origin-country"
+            class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+          >
+            Origin Country & Currency
+          </label>
+          <select
+            id="origin-country"
+            v-model="originCountryCode"
+            class="w-full px-4 py-3 text-lg border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          >
+            <option
+              v-for="country in countries"
+              :key="country.code"
+              :value="country.code"
+            >
+              {{ country.flag }} {{ country.name }} ({{ country.currencyCode }})
+            </option>
+          </select>
+          <!-- PPP Factor Display for Origin -->
+          <p v-if="originCountry && pppFactors[originCountry.currencyCode]" class="text-xs text-gray-500 dark:text-gray-400">
+            PPP Factor (2024): {{ pppFactors[originCountry.currencyCode]?.toFixed(3) }}
+          </p>
+        </div>
+
+        <!-- Swap Button -->
+        <div class="flex justify-center">
+          <button
+            type="button"
+            class="p-3 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-800 transition-colors"
+            @click="swapCountries"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <!-- Target Country Selector -->
+        <div class="space-y-2">
+          <label
+            for="target-country"
+            class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+          >
+            Target Country & Currency
+          </label>
+          <select
+            id="target-country"
+            v-model="targetCountryCode"
+            class="w-full px-4 py-3 text-lg border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          >
+            <option
+              v-for="country in countries"
+              :key="country.code"
+              :value="country.code"
+            >
+              {{ country.flag }} {{ country.name }} ({{ country.currencyCode }})
+            </option>
+          </select>
+          <!-- PPP Factor Display for Target -->
+          <p v-if="targetCountry && pppFactors[targetCountry.currencyCode]" class="text-xs text-gray-500 dark:text-gray-400">
+            PPP Factor (2024): {{ pppFactors[targetCountry.currencyCode]?.toFixed(3) }}
+          </p>
+        </div>
+
+        <!-- Results -->
+        <div
+          v-if="convertedPrice && price"
+          class="mt-8 space-y-4 pt-6 border-t border-gray-200 dark:border-gray-700"
+        >
+          <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            Conversion Results
+          </h3>
+
+          <!-- Exchange Rate Conversion -->
+          <div class="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
+            <div class="flex justify-between items-center">
+              <div>
+                <p class="text-sm text-gray-600 dark:text-gray-400">
+                  Exchange Rate Conversion
+                </p>
+                <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                  {{ formatCurrency(convertedPrice.exchange, convertedPrice.currency) }}
+                </p>
+              </div>
+              <div class="text-sm text-gray-500 dark:text-gray-400">
+                {{ originCountry?.currencyCode }} → {{ targetCountry?.currencyCode }}
+              </div>
+            </div>
+          </div>
+
+          <!-- PPP Adjusted Conversion -->
+          <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-4">
+            <div class="flex justify-between items-center">
+              <div>
+                <p class="text-sm text-gray-600 dark:text-gray-400">
+                  PPP-Adjusted Price
+                </p>
+                <p class="text-2xl font-bold text-green-600 dark:text-green-400">
+                  {{ formatCurrency(convertedPrice.ppp, convertedPrice.currency) }}
+                </p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Using PPP factors: {{ convertedPrice.originPPP.toFixed(3) }} (origin) / {{ convertedPrice.targetPPP.toFixed(3) }} (target)
+                </p>
+              </div>
+              <div class="text-sm text-gray-500 dark:text-gray-400">
+                Purchasing Power Parity
+              </div>
+            </div>
+          </div>
+
+          <!-- Explanation -->
+          <div class="text-xs text-gray-500 dark:text-gray-400 mt-4">
+            <p>
+              💡 <strong>Exchange Rate Conversion:</strong> Direct currency conversion using market exchange rates.
+            </p>
+            <p class="mt-1">
+              💡 <strong>PPP-Adjusted Price:</strong> Price adjusted for purchasing power differences, showing relative value in local economy.
+            </p>
+            <p class="mt-1">
+              💡 <strong>PPP Factors:</strong> Based on World Bank 2024 data. A lower PPP factor means stronger purchasing power.
+            </p>
+          </div>
+        </div>
+
+        <!-- No input message -->
+        <div
+          v-else
+          class="mt-8 text-center text-gray-500 dark:text-gray-400 py-12"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            class="h-6 w-6"
+            class="h-16 w-16 mx-auto mb-4 text-gray-300 dark:text-gray-600"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -213,109 +362,11 @@ const swapCountries = () => {
               stroke-linecap="round"
               stroke-linejoin="round"
               stroke-width="2"
-              d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"
+              d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
             />
           </svg>
-        </button>
-      </div>
-
-      <!-- Target Country Selector -->
-      <div class="space-y-2">
-        <label
-          for="target-country"
-          class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-        >
-          Target Country & Currency
-        </label>
-        <select
-          id="target-country"
-          v-model="targetCountryCode"
-          class="w-full px-4 py-3 text-lg border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-        >
-          <option
-            v-for="country in countries"
-            :key="country.code"
-            :value="country.code"
-          >
-            {{ country.flag }} {{ country.name }} ({{ country.currencyCode }})
-          </option>
-        </select>
-      </div>
-
-      <!-- Results -->
-      <div
-        v-if="convertedPrice && price"
-        class="mt-8 space-y-4 pt-6 border-t border-gray-200 dark:border-gray-700"
-      >
-        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          Conversion Results
-        </h3>
-
-        <!-- Exchange Rate Conversion -->
-        <div class="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
-          <div class="flex justify-between items-center">
-            <div>
-              <p class="text-sm text-gray-600 dark:text-gray-400">
-                Exchange Rate Conversion
-              </p>
-              <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                {{ formatCurrency(convertedPrice.exchange, convertedPrice.currency) }}
-              </p>
-            </div>
-            <div class="text-sm text-gray-500 dark:text-gray-400">
-              {{ originCountry?.currencyCode }} → {{ targetCountry?.currencyCode }}
-            </div>
-          </div>
+          <p>Enter a price to see the conversion</p>
         </div>
-
-        <!-- PPP Adjusted Conversion -->
-        <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-4">
-          <div class="flex justify-between items-center">
-            <div>
-              <p class="text-sm text-gray-600 dark:text-gray-400">
-                PPP-Adjusted Price
-              </p>
-              <p class="text-2xl font-bold text-green-600 dark:text-green-400">
-                {{ formatCurrency(convertedPrice.ppp, convertedPrice.currency) }}
-              </p>
-            </div>
-            <div class="text-sm text-gray-500 dark:text-gray-400">
-              Purchasing Power Parity
-            </div>
-          </div>
-        </div>
-
-        <!-- Explanation -->
-        <div class="text-xs text-gray-500 dark:text-gray-400 mt-4">
-          <p>
-            💡 <strong>Exchange Rate Conversion:</strong> Direct currency conversion using market exchange rates.
-          </p>
-          <p class="mt-1">
-            💡 <strong>PPP-Adjusted Price:</strong> Price adjusted for purchasing power differences, showing relative value in local economy.
-          </p>
-        </div>
-      </div>
-
-      <!-- No input message -->
-      <div
-        v-else
-        class="mt-8 text-center text-gray-500 dark:text-gray-400 py-12"
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          class="h-16 w-16 mx-auto mb-4 text-gray-300 dark:text-gray-600"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-          />
-        </svg>
-        <p>Enter a price to see the conversion</p>
       </div>
     </div>
   </div>
