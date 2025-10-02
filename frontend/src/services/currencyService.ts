@@ -159,7 +159,7 @@ const FALLBACK_RATES: ExchangeRates = {
     GNF: 8600.0,
   },
   timestamp: Date.now(),
-  lastUpdated: 'Static fallback rates'
+  lastUpdated: 'Static fallback rates',
 }
 
 /**
@@ -179,35 +179,35 @@ export async function fetchExchangeRates(): Promise<ExchangeRates> {
     // Fetch from API - using exchangerate-api.com free tier
     // Alternative: 'https://open.er-api.com/v6/latest/USD'
     const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD')
-    
+
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
-    
+
     const data = await response.json()
-    
+
     const exchangeRates: ExchangeRates = {
       base: data.base || 'USD',
       rates: data.rates || {},
       timestamp: Date.now(),
-      lastUpdated: data.date || new Date().toISOString().split('T')[0]
+      lastUpdated: data.date || new Date().toISOString().split('T')[0],
     }
 
     // Cache the rates
     cacheRates(exchangeRates)
-    
+
     console.log('Fetched fresh exchange rates from API')
     return exchangeRates
   } catch (error) {
     console.error('Failed to fetch exchange rates:', error)
-    
+
     // Try to use cached rates even if expired
     const cached = getCachedRates()
     if (cached) {
       console.warn('Using expired cached rates due to API failure')
       return cached
     }
-    
+
     // Fall back to static rates
     console.warn('Using fallback static rates')
     return FALLBACK_RATES
