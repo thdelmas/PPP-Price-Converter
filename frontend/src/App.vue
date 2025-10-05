@@ -1,7 +1,12 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import BottomNav from '@/components/layout/BottomNav.vue'
+</script>
 
 <template>
-  <RouterView />
+  <div class="min-h-screen">
+    <RouterView />
+    <BottomNav />
+  </div>
 </template>
 
 <style scoped></style>
